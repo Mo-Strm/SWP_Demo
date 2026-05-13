@@ -5,6 +5,7 @@ import type { Researcher } from "../types/researcher";
 
 interface Props {
   researcher: Researcher | null;
+  onClose: () => void;
 }
 
 const PAPERS_PER_PAGE = 10;
@@ -13,7 +14,7 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("de-DE").format(value);
 }
 
-export function ResearcherDetailPanel({ researcher }: Props) {
+export function ResearcherDetailPanel({ researcher, onClose }: Props) {
   const [csWorks, setCsWorks] = useState<CsWorkSummary[]>([]);
   const [worksState, setWorksState] = useState<
     "idle" | "loading" | "ready" | "error"
@@ -63,19 +64,19 @@ export function ResearcherDetailPanel({ researcher }: Props) {
   const hasNext = page < totalPages;
   const firstIndex = (page - 1) * PAPERS_PER_PAGE;
 
-  if (!researcher) {
-    return (
-      <aside className="detail-panel">
-        <div className="empty-state">
-          <p>Wähle einen Marker auf der Karte aus,</p>
-          <p>um Details zu einem Forschenden zu sehen.</p>
-        </div>
-      </aside>
-    );
-  }
+  if (!researcher) return null;
 
   return (
     <aside className="detail-panel">
+      <button
+        type="button"
+        className="detail-panel__close"
+        onClick={onClose}
+        aria-label="Detailansicht schließen"
+        title="Detailansicht schließen"
+      >
+        ×
+      </button>
       <h2>{researcher.name}</h2>
       <p>{researcher.institution}</p>
       {researcher.country && <p style={{ color: "#94a3b8" }}>{researcher.country}</p>}

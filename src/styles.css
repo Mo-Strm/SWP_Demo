@@ -125,6 +125,7 @@ body,
 }
 
 .detail-panel {
+  position: relative;
   width: 360px;
   background: #1e293b;
   border-left: 1px solid #334155;
@@ -132,8 +133,39 @@ body,
   padding: 16px;
 }
 
+.detail-panel__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.detail-panel__close:hover {
+  background: #0f172a;
+  color: #f1f5f9;
+  border-color: #334155;
+}
+
+.detail-panel__close:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
 .detail-panel h2 {
   margin: 0 0 4px 0;
+  padding-right: 36px;
   font-size: 16px;
   color: #f1f5f9;
 }

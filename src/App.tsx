@@ -208,7 +208,10 @@ export default function App() {
             </div>
           )}
         </div>
-        <ResearcherDetailPanel researcher={selected} />
+        <ResearcherDetailPanel
+          researcher={selected}
+          onClose={() => setSelectedId(null)}
+        />
       </div>
     </div>
   );
