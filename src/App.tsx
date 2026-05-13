@@ -4,10 +4,16 @@ import { ResearcherMap } from "./components/ResearcherMap";
 import { ResearcherDetailPanel } from "./components/ResearcherDetailPanel";
 import { streamResearchers } from "./services/openalex";
 import type { Researcher } from "./types/researcher";
+import {
+  clearResearcherCache,
+  formatRelativeTime,
+  loadResearcherCache,
+  saveResearcherCache,
+} from "./utils/researcherCache";
 
 type LoadState = "idle" | "streaming" | "ready" | "error";
 
-const RESEARCHER_LIMIT = 500;
+const RESEARCHER_LIMIT = 1000;
 
 export default function App() {
   const [researchers, setResearchers] = useState<Researcher[]>([]);
@@ -16,9 +22,31 @@ export default function App() {
   const [inspected, setInspected] = useState(0);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [cacheSavedAt, setCacheSavedAt] = useState<number | null>(null);
+  const [fromCache, setFromCache] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (reloadKey === 0) {
+      const cached = loadResearcherCache();
+      if (cached && cached.researchers.length > 0) {
+        setResearchers(cached.researchers);
+        setCacheSavedAt(cached.savedAt);
+        setFromCache(true);
+        setState("ready");
+        return () => {
+          cancelled = true;
+        };
+      }
+    }
+
+    setFromCache(false);
+    setCacheSavedAt(null);
+
+    const accumulator: Researcher[] = [];
+
     async function run() {
       setState("streaming");
       setErrorMessage(null);
@@ -32,11 +60,14 @@ export default function App() {
             if (cancelled) return;
             setInspected(progress.inspected);
             if (batch.length > 0) {
+              accumulator.push(...batch);
               setResearchers((prev) => prev.concat(batch));
             }
           },
           onDone: () => {
             if (cancelled) return;
+            const savedAt = saveResearcherCache(accumulator);
+            setCacheSavedAt(savedAt);
             setState("ready");
           },
         });
@@ -48,11 +79,21 @@ export default function App() {
         setState("error");
       }
     }
+
     void run();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
+
+  function refresh() {
+    clearResearcherCache();
+    setFromCache(false);
+    setCacheSavedAt(null);
+    setResearchers([]);
+    setSelectedId(null);
+    setReloadKey((k) => k + 1);
+  }
 
   const filtered = useMemo(() => {
     if (!query.trim()) return researchers;
@@ -83,14 +124,20 @@ export default function App() {
       return <span className="status-pill error">API-Fehler</span>;
     }
     if (state === "ready") {
+      const ageText =
+        cacheSavedAt != null ? ` · ${formatRelativeTime(cacheSavedAt)}` : "";
+      const sourceText = fromCache ? "Aus Cache" : "Frisch von OpenAlex";
       return (
         <span className="status-pill ok">
-          {researchers.length} Forschende geladen
+          {researchers.length} Forschende · {sourceText}
+          {ageText}
         </span>
       );
     }
     return null;
   })();
+
+  const refreshDisabled = state === "streaming";
 
   return (
     <div className="app">
@@ -108,6 +155,15 @@ export default function App() {
           resultCount={filtered.length}
         />
         {statusPill}
+        <button
+          type="button"
+          className="refresh-btn"
+          onClick={refresh}
+          disabled={refreshDisabled}
+          title="Cache leeren und Daten neu von OpenAlex laden"
+        >
+          {state === "streaming" ? "Lädt..." : "Aktualisieren"}
+        </button>
       </header>
       <div className="app-body">
         <div className="map-wrapper">

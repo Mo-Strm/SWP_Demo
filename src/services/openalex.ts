@@ -89,6 +89,96 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** Kurzliste von Werken mit OpenAlex-Thema „Computer science“ für ein Autorenprofil. */
+export interface CsWorkSummary {
+  id: string;
+  title: string;
+}
+
+export interface CsWorksPage {
+  results: CsWorkSummary[];
+  total: number;
+  page: number;
+  perPage: number;
+}
+
+interface OpenAlexWork {
+  id: string;
+  display_name: string | null;
+}
+
+/** Entfernt HTML-Tags und Entitäten, die OpenAlex gelegentlich in Titeln liefert. */
+function cleanTitle(raw: string | null | undefined): string {
+  if (!raw) return "Ohne Titel";
+  const stripped = raw
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.length > 0 ? stripped : "Ohne Titel";
+}
+
+/**
+ * Lädt eine Seite der nach Zitationen sortierten Werke eines Autors,
+ * die in OpenAlex dem Konzept „Computer science“ zugeordnet sind.
+ *
+ * Pages werden in einem einfachen In-Memory-LRU-Cache gehalten, sodass
+ * wiederholtes Klicken auf denselben Forscher (oder Blättern nach vorne
+ * und zurück) ohne erneute Netzwerk-Anfrage funktioniert.
+ */
+const csWorksCache = new Map<string, CsWorksPage>();
+const CS_WORKS_CACHE_LIMIT = 200;
+
+function csWorksCacheKey(authorId: string, page: number, perPage: number) {
+  return `${authorId}|p${page}|pp${perPage}`;
+}
+
+export async function fetchCsWorksForAuthor(
+  authorOpenAlexId: string,
+  options: { page?: number; perPage?: number } = {}
+): Promise<CsWorksPage> {
+  const page = Math.max(1, options.page ?? 1);
+  const perPage = Math.min(Math.max(1, options.perPage ?? 10), 200);
+  const key = csWorksCacheKey(authorOpenAlexId, page, perPage);
+
+  const cached = csWorksCache.get(key);
+  if (cached) {
+    csWorksCache.delete(key);
+    csWorksCache.set(key, cached);
+    return cached;
+  }
+
+  const filter = `authorships.author.id:${authorOpenAlexId},concepts.id:C41008148`;
+  const url =
+    `${OPENALEX_BASE}/works` +
+    `?filter=${encodeURIComponent(filter)}` +
+    `&sort=cited_by_count:desc` +
+    `&per_page=${perPage}` +
+    `&page=${page}`;
+  const data = await fetchJson<OpenAlexListResponse<OpenAlexWork>>(url);
+  const results = (data.results ?? []).map((w) => ({
+    id: w.id,
+    title: cleanTitle(w.display_name),
+  }));
+  const value: CsWorksPage = {
+    results,
+    total: data.meta?.count ?? results.length,
+    page,
+    perPage,
+  };
+
+  csWorksCache.set(key, value);
+  if (csWorksCache.size > CS_WORKS_CACHE_LIMIT) {
+    const oldest = csWorksCache.keys().next().value;
+    if (oldest) csWorksCache.delete(oldest);
+  }
+  return value;
+}
+
 export async function fetchTopCsAuthors(
   limit = 50
 ): Promise<OpenAlexAuthor[]> {
@@ -99,8 +189,8 @@ export async function fetchTopCsAuthors(
    */
   const collected: OpenAlexAuthor[] = [];
   const perPage = 200;
-  /** Genug Seiten, um z. B. 500 CS-Autoren aus der globalen Zitationsliste zu sammeln. */
-  const maxPages = 80;
+  /** Genug Seiten, um viele CS-Kandidaten aus der globalen Zitationsliste zu sammeln. */
+  const maxPages = 120;
   let page = 1;
 
   while (collected.length < limit && page <= maxPages) {
@@ -181,7 +271,8 @@ export async function streamResearchers(opts: StreamOptions): Promise<void> {
   const isCancelled = opts.isCancelled ?? (() => false);
 
   const perPage = 200;
-  const maxPages = 80;
+  /** Genug Seiten, um z. B. 1000 CS-Kandidaten aus der globalen Zitationsliste zu sammeln. */
+  const maxPages = 120;
   const seenKey = new Set<string>();
 
   let page = 1;
