@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SearchBar } from "./components/SearchBar";
 import { ResearcherMap } from "./components/ResearcherMap";
+import { ResearcherGraph } from "./components/ResearcherGraph";
 import { ResearcherDetailPanel } from "./components/ResearcherDetailPanel";
 import { streamResearchers } from "./services/openalex";
 import type { Researcher } from "./types/researcher";
@@ -12,6 +13,7 @@ import {
 } from "./utils/researcherCache";
 
 type LoadState = "idle" | "streaming" | "ready" | "error";
+type ViewMode = "map" | "graph";
 
 const RESEARCHER_LIMIT = 1000;
 
@@ -25,6 +27,7 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [cacheSavedAt, setCacheSavedAt] = useState<number | null>(null);
   const [fromCache, setFromCache] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("map");
 
   useEffect(() => {
     let cancelled = false;
@@ -193,14 +196,25 @@ export default function App() {
             <div className="empty-state">Keine Treffer für „{query}“.</div>
           )}
           {(state === "streaming" || state === "ready") &&
-            researchers.length > 0 && (
+            researchers.length > 0 &&
+            viewMode === "map" && (
               <ResearcherMap
                 researchers={filtered}
                 selectedId={selectedId}
                 onSelect={(r) => setSelectedId(r.id)}
               />
             )}
-          {researchers.length > 0 && (
+          {(state === "streaming" || state === "ready") &&
+            researchers.length > 0 &&
+            viewMode === "graph" && (
+              <ResearcherGraph
+                researchers={filtered}
+                selectedId={selectedId}
+                onSelect={(r) => setSelectedId(r.id)}
+                onBackToMap={() => setViewMode("map")}
+              />
+            )}
+          {researchers.length > 0 && viewMode === "map" && (
             <div className="legend">
               Marker = Forschende (verortet über die letzte bekannte
               Institution)
@@ -210,7 +224,9 @@ export default function App() {
         </div>
         <ResearcherDetailPanel
           researcher={selected}
+          viewMode={viewMode}
           onClose={() => setSelectedId(null)}
+          onOpenGraph={() => setViewMode("graph")}
         />
       </div>
     </div>

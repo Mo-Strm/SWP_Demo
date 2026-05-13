@@ -179,6 +179,222 @@ export async function fetchCsWorksForAuthor(
   return value;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Co-Author-Graph (CS-only, capped)
+ *
+ * Ziel: Aus der bereits geladenen Forschermenge einen Kollaborations-Graphen
+ * aufbauen, ohne die Forschermenge neu zu laden. Pro Forscher werden
+ * seitenweise dessen CS-Werke geladen (nur das Feld `authorships`), Kanten
+ * entstehen zwischen Co-Autoren, die ebenfalls in der geladenen Menge sind.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export interface CoauthorEdge {
+  /** Lexikographisch kleinere OpenAlex-Autor-URL. */
+  source: string;
+  /** Lexikographisch größere OpenAlex-Autor-URL. */
+  target: string;
+  /** Anzahl gemeinsamer (CS-)Werke. */
+  weight: number;
+}
+
+export interface CoauthorGraphProgress {
+  processedAuthors: number;
+  totalAuthors: number;
+  totalEdges: number;
+  done: boolean;
+}
+
+export interface CoauthorStreamOptions {
+  /** Bereits geladene Forscher (Knoten). */
+  researchers: Pick<Researcher, "id">[];
+  /** Wird vor jedem Schritt geprüft; wenn true, bricht der Stream sauber ab. */
+  isCancelled?: () => boolean;
+  /** Inkrementelle neue (oder aktualisierte) Kanten. */
+  onBatch: (edges: CoauthorEdge[], progress: CoauthorGraphProgress) => void;
+  /** Wird einmal am Ende oder bei Abbruch aufgerufen. */
+  onDone?: (progress: CoauthorGraphProgress) => void;
+  /** Maximale Anzahl Werk-Seiten (à 200) pro Autor. Standard: 3. */
+  maxWorksPagesPerAuthor?: number;
+  /** Maximale Anzahl paralleler Author-Verarbeitungen. Standard: 4. */
+  concurrency?: number;
+}
+
+interface OpenAlexWorkWithAuthors {
+  id: string;
+  authorships?: Array<{ author?: { id?: string } } | null> | null;
+}
+
+/** In-Memory-Cache: pro Autor → Map<CoautorenId, Gewicht>. */
+const coauthorCache = new Map<string, Map<string, number>>();
+const COAUTHOR_CACHE_LIMIT = 2000;
+
+function edgeKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+/**
+ * Lädt für einen einzelnen Forscher den Ego-Graph: Kanten zu seinen
+ * Co-Autoren, optional gefiltert auf eine bekannte Knotenmenge (z. B. die
+ * geladenen Forscher) und mit Schwellenwert/Limits zur Lesbarkeit.
+ */
+export async function fetchEgoEdgesForAuthor(
+  centerId: string,
+  options: {
+    knownNodeIds?: Set<string>;
+    maxPages?: number;
+    minWeight?: number;
+    maxNeighbors?: number;
+  } = {}
+): Promise<CoauthorEdge[]> {
+  const maxPages = Math.max(1, options.maxPages ?? 3);
+  const minWeight = Math.max(1, options.minWeight ?? 1);
+  const maxNeighbors = Math.max(1, options.maxNeighbors ?? 30);
+  const known = options.knownNodeIds;
+
+  const counts = await fetchCoauthorsForAuthor(centerId, maxPages);
+
+  const filtered: Array<[string, number]> = [];
+  for (const [coId, weight] of counts) {
+    if (weight < minWeight) continue;
+    if (known && !known.has(coId)) continue;
+    filtered.push([coId, weight]);
+  }
+  filtered.sort((a, b) => b[1] - a[1]);
+  const top = filtered.slice(0, maxNeighbors);
+
+  return top.map(([coId, weight]) => ({
+    source: centerId < coId ? centerId : coId,
+    target: centerId < coId ? coId : centerId,
+    weight,
+  }));
+}
+
+/**
+ * Lädt für einen Autor alle (gecappten) Co-Autoren-IDs mit Häufigkeit
+ * gemeinsamer CS-Werke. Ergebnis wird im Modul-Cache abgelegt.
+ */
+async function fetchCoauthorsForAuthor(
+  authorId: string,
+  maxPages: number
+): Promise<Map<string, number>> {
+  const cached = coauthorCache.get(authorId);
+  if (cached) {
+    coauthorCache.delete(authorId);
+    coauthorCache.set(authorId, cached);
+    return cached;
+  }
+
+  const counts = new Map<string, number>();
+  const filter = `authorships.author.id:${authorId},concepts.id:C41008148`;
+  const perPage = 200;
+
+  for (let page = 1; page <= maxPages; page++) {
+    const url =
+      `${OPENALEX_BASE}/works` +
+      `?filter=${encodeURIComponent(filter)}` +
+      `&select=id,authorships` +
+      `&per_page=${perPage}` +
+      `&page=${page}`;
+    let data: OpenAlexListResponse<OpenAlexWorkWithAuthors>;
+    try {
+      data = await fetchJson<OpenAlexListResponse<OpenAlexWorkWithAuthors>>(url);
+    } catch {
+      break;
+    }
+    if (!data.results || data.results.length === 0) break;
+
+    for (const work of data.results) {
+      const authorships = work.authorships ?? [];
+      for (const a of authorships) {
+        const coId = a?.author?.id;
+        if (!coId || coId === authorId) continue;
+        counts.set(coId, (counts.get(coId) ?? 0) + 1);
+      }
+    }
+
+    if (data.results.length < perPage) break;
+  }
+
+  coauthorCache.set(authorId, counts);
+  if (coauthorCache.size > COAUTHOR_CACHE_LIMIT) {
+    const oldest = coauthorCache.keys().next().value;
+    if (oldest) coauthorCache.delete(oldest);
+  }
+  return counts;
+}
+
+/**
+ * Streamt Kanten des Co-Author-Graphen für die übergebene Forschermenge.
+ * Es werden nur Kanten zwischen Forschern erzeugt, die ebenfalls in der
+ * Menge enthalten sind (Schnittmenge).
+ */
+export async function streamCoauthorEdges(
+  opts: CoauthorStreamOptions
+): Promise<void> {
+  const isCancelled = opts.isCancelled ?? (() => false);
+  const maxPages = Math.max(1, opts.maxWorksPagesPerAuthor ?? 3);
+  const concurrency = Math.max(1, Math.min(8, opts.concurrency ?? 4));
+
+  const nodeIds = new Set(opts.researchers.map((r) => r.id));
+  const edgeWeights = new Map<string, CoauthorEdge>();
+
+  const queue = [...opts.researchers].map((r) => r.id);
+  let processed = 0;
+  const totalAuthors = queue.length;
+
+  async function worker(): Promise<void> {
+    while (queue.length > 0) {
+      if (isCancelled()) return;
+      const authorId = queue.shift();
+      if (!authorId) return;
+
+      const counts = await fetchCoauthorsForAuthor(authorId, maxPages);
+      processed++;
+
+      if (isCancelled()) return;
+
+      const newOrUpdated: CoauthorEdge[] = [];
+      for (const [coId, weight] of counts) {
+        if (!nodeIds.has(coId)) continue;
+        const key = edgeKey(authorId, coId);
+        const existing = edgeWeights.get(key);
+        if (existing) {
+          if (existing.weight < weight) {
+            existing.weight = weight;
+            newOrUpdated.push(existing);
+          }
+          continue;
+        }
+        const edge: CoauthorEdge = {
+          source: authorId < coId ? authorId : coId,
+          target: authorId < coId ? coId : authorId,
+          weight,
+        };
+        edgeWeights.set(key, edge);
+        newOrUpdated.push(edge);
+      }
+
+      opts.onBatch(newOrUpdated, {
+        processedAuthors: processed,
+        totalAuthors,
+        totalEdges: edgeWeights.size,
+        done: false,
+      });
+    }
+  }
+
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < concurrency; i++) workers.push(worker());
+  await Promise.all(workers);
+
+  opts.onDone?.({
+    processedAuthors: processed,
+    totalAuthors,
+    totalEdges: edgeWeights.size,
+    done: true,
+  });
+}
+
 export async function fetchTopCsAuthors(
   limit = 50
 ): Promise<OpenAlexAuthor[]> {

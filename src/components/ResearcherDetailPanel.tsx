@@ -5,7 +5,9 @@ import type { Researcher } from "../types/researcher";
 
 interface Props {
   researcher: Researcher | null;
+  viewMode: "map" | "graph";
   onClose: () => void;
+  onOpenGraph: () => void;
 }
 
 const PAPERS_PER_PAGE = 10;
@@ -14,7 +16,12 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("de-DE").format(value);
 }
 
-export function ResearcherDetailPanel({ researcher, onClose }: Props) {
+export function ResearcherDetailPanel({
+  researcher,
+  viewMode,
+  onClose,
+  onOpenGraph,
+}: Props) {
   const [csWorks, setCsWorks] = useState<CsWorkSummary[]>([]);
   const [worksState, setWorksState] = useState<
     "idle" | "loading" | "ready" | "error"
@@ -80,6 +87,17 @@ export function ResearcherDetailPanel({ researcher, onClose }: Props) {
       <h2>{researcher.name}</h2>
       <p>{researcher.institution}</p>
       {researcher.country && <p style={{ color: "#94a3b8" }}>{researcher.country}</p>}
+
+      <button
+        type="button"
+        className="open-graph-btn"
+        onClick={onOpenGraph}
+        title="Kollaborations-Graph dieses Forschers anzeigen"
+      >
+        {viewMode === "graph"
+          ? "Diesen Forscher im Graph fokussieren"
+          : "Co-Author-Graph öffnen"}
+      </button>
 
       <h3>Kennzahlen</h3>
       <div className="metric-grid">

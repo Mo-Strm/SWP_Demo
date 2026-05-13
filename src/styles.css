@@ -450,3 +450,115 @@ body,
   color: #cbd5e1;
   z-index: 500;
 }
+
+.graph-wrapper {
+  position: absolute;
+  inset: 0;
+  background: #0f172a;
+}
+
+.graph-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.graph-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.graph-btn {
+  appearance: none;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.graph-btn:hover {
+  background: #1e293b;
+  border-color: #38bdf8;
+  color: #f1f5f9;
+}
+
+.graph-toggle {
+  display: inline-flex;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.graph-toggle__btn {
+  appearance: none;
+  background: transparent;
+  color: #cbd5e1;
+  border: none;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.graph-toggle__btn:hover {
+  color: #f1f5f9;
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.graph-toggle__btn--active {
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+.graph-status {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 500;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #cbd5e1;
+  max-width: 70%;
+  line-height: 1.4;
+}
+
+.graph-status--error {
+  color: #fca5a5;
+}
+
+.open-graph-btn {
+  margin-top: 10px;
+  width: 100%;
+  background: #38bdf8;
+  color: #0f172a;
+  border: 1px solid #38bdf8;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.open-graph-btn:hover {
+  background: #7dd3fc;
+  border-color: #7dd3fc;
+}
